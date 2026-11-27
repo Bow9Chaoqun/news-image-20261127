@@ -1,486 +1,295 @@
 #!/usr/bin/env python3
-"""Draw the front page for Friday 27 November 2026.
+"""Draw the 27 November 2026 broadsheet front page (1024x1024 PNG).
 
-The picture is a broadsheet front page for the make.fun
-news-image-20261127 bounty: one lead story, five more stories in
-two rows, and a ticker of shorter items along the foot.
-
-Everything is painted with Pillow on a canvas twice the final size
-and then downscaled, so the lettering stays crisp at 1024 x 1024.
-
-    python3 build_image.py        # writes ./entry.png
-
-main.py is the graded entry program; it only copies this PNG.
+Paints at 2x (2048x2048) and downscales for crisp text. Pillow only,
+no network, no downloaded images -- every glyph is drawn with shapes.
 """
-
-from dataclasses import dataclass
-from math import cos, pi, sin
-from pathlib import Path
-
+import os
 from PIL import Image, ImageDraw, ImageFont
 
-SCALE = 2
-SIZE = 1024
-CANVAS = SIZE * SCALE
-HERE = Path(__file__).resolve().parent
-OUT = HERE / "entry.png"
+S = 2                      # supersampling factor
+W, H = 1024 * S, 1024 * S  # working canvas
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "entry.png")
 
-PAPER = (247, 243, 232)
-CARD = (255, 253, 246)
-INK = (22, 26, 43)
-NAVY = (27, 42, 74)
-BODY_INK = (30, 30, 34)
-MUTED = (96, 92, 84)
-GOLD = (212, 168, 74)
-RUST = (178, 58, 32)
-TEAL = (18, 110, 105)
-OCHRE = (164, 110, 20)
-PLUM = (110, 52, 110)
-PINE = (34, 96, 58)
-SLATE = (70, 90, 112)
+FONT_DIR = "/usr/share/fonts/truetype/liberation"
 
-FONTS = Path("/usr/share/fonts/truetype/liberation")
-SERIF_BOLD = FONTS / "LiberationSerif-Bold.ttf"
-SANS_BOLD = FONTS / "LiberationSans-Bold.ttf"
-SANS = FONTS / "LiberationSans-Regular.ttf"
-SANS_ITALIC = FONTS / "LiberationSans-Italic.ttf"
+def font(name, size):
+    return ImageFont.truetype(os.path.join(FONT_DIR, name), size * S)
 
+F_SERIF_BOLD = lambda s: font("LiberationSerif-Bold.ttf", s)
+F_SANS_BOLD  = lambda s: font("LiberationSans-Bold.ttf", s)
+F_SANS       = lambda s: font("LiberationSans-Regular.ttf", s)
+F_SANS_ITAL  = lambda s: font("LiberationSans-Italic.ttf", s)
 
-def face(path, points):
-    return ImageFont.truetype(str(path), points * SCALE)
+# Palette
+NAVY   = (16, 34, 64)
+NAVY2  = (24, 48, 88)
+GOLD   = (212, 175, 55)
+PAPER  = (247, 243, 232)
+CARD   = (255, 255, 255)
+INK    = (20, 20, 20)
+GREY   = (90, 90, 90)
+RULE   = (200, 192, 172)
+RED    = (150, 30, 30)
+BLUE   = (40, 90, 160)
+TEAL   = (20, 120, 110)
 
+img = Image.new("RGB", (W, H), PAPER)
+d = ImageDraw.Draw(img)
 
-def fit_lines(draw, text, font, width):
-    """Wrap text to the given pixel width, returning a list of lines."""
-    lines, current = [], ""
+M = 40 * S          # page margin
+CW = W - 2 * M      # content width
+
+def wrap(text, fnt, max_w):
+    """Greedy word wrap; returns list of lines that fit max_w."""
+    lines, cur = [], ""
     for word in text.split():
-        trial = f"{current} {word}".strip()
-        if draw.textlength(trial, font=font) <= width or not current:
-            current = trial
+        trial = (cur + " " + word).strip()
+        if d.textlength(trial, font=fnt) <= max_w:
+            cur = trial
         else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+            if cur:
+                lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
     return lines
 
-
-def line_step(font, factor=1.18):
-    ascent, descent = font.getmetrics()
-    return int((ascent + descent) * factor)
-
-
-def paint_lines(draw, x, y, lines, font, colour, factor=1.18):
-    step = line_step(font, factor)
-    for line in lines:
-        draw.text((x, y), line, font=font, fill=colour)
-        y += step
+def text_block(x, y, lines, fnt, fill, spacing=None):
+    """Draw lines; returns y just below the last line."""
+    lh = fnt.size + (spacing if spacing is not None else int(6 * S))
+    for ln in lines:
+        d.text((x, y), ln, font=fnt, fill=fill)
+        y += lh
     return y
 
+def card(x, y, w, h, outline=RULE):
+    d.rounded_rectangle([x, y, x + w, y + h], radius=10 * S,
+                        fill=CARD, outline=outline, width=2 * S)
 
-def block_height(font, n_lines, factor=1.18):
-    return line_step(font, factor) * n_lines // SCALE
+def kicker(x, y, label, color=RED):
+    f = F_SANS_BOLD(15)
+    d.text((x, y), label, font=f, fill=color)
+    return y + f.size + 8 * S
 
+# ---------------------------------------------------------------- masthead
+d.rectangle([0, 0, W, 96 * S], fill=NAVY)
+d.rectangle([0, 96 * S, W, 100 * S], fill=GOLD)
+title = "THE WORLD IN ONE PICTURE"
+tf = F_SERIF_BOLD(40)
+tw = d.textlength(title, font=tf)
+d.text(((W - tw) / 2, 12 * S), title, font=tf, fill=(255, 255, 255))
+date = "FRIDAY 27 NOVEMBER 2026"
+df = F_SANS_BOLD(17)
+dw = d.textlength(date, font=df)
+d.text(((W - dw) / 2, 62 * S), date, font=df, fill=GOLD)
 
-def centred_line(draw, y, text, font, colour):
-    draw.text((CANVAS // 2, y), text, font=font, fill=colour, anchor="ma")
-    ascent, descent = font.getmetrics()
-    return y + ascent + descent
+y = 116 * S
 
+# ---------------------------------------------------------------- lead story
+LEAD_H = 196 * S
+card(M, y, CW, LEAD_H)
+lx, ly = M + 22 * S, y + 16 * S
+glyph_w = 250 * S
+text_w = CW - 44 * S - glyph_w
+ly = kicker(lx, ly, "LEAD STORY  ·  ELECTION")
+hf = F_SERIF_BOLD(34)
+head_lines = wrap("New Zealand coalition loses its majority", hf, text_w)
+ly = text_block(lx, ly + 4 * S, head_lines, hf, INK, spacing=6 * S)
+sf = F_SANS(19)
+stand_lines = wrap(
+    "Final results leave PM Luxon one seat short; the centre-right "
+    "government now needs the centrist Opportunity Party to stay in power.",
+    sf, text_w)
+text_block(lx, ly + 8 * S, stand_lines, sf, GREY, spacing=5 * S)
 
-def tag_chip(draw, x, y, wording, colour):
-    font = face(SANS_BOLD, 19)
-    wide = draw.textlength(wording, font=font)
-    draw.rounded_rectangle(
-        [x, y, x + wide + 24 * SCALE, y + 30 * SCALE],
-        radius=7 * SCALE, fill=colour)
-    draw.text((x + 12 * SCALE, y + 4 * SCALE), wording, font=font,
-              fill=(255, 255, 255))
+# scales glyph (right side of lead card)
+gx = M + CW - glyph_w + 20 * S
+gy = y + 34 * S
+gw, gh = 210 * S, 150 * S
+cx = gx + gw // 2
+d.line([cx, gy, cx, gy + gh - 30 * S], fill=NAVY, width=6 * S)          # post
+d.line([gx + 10 * S, gy + 14 * S, gx + gw - 10 * S, gy + 14 * S],
+       fill=NAVY, width=6 * S)                                          # beam
+d.ellipse([cx - 8 * S, gy - 6 * S, cx + 8 * S, gy + 10 * S], fill=GOLD)  # finial
+for side in (-1, 1):
+    px = cx + side * (gw // 2 - 16 * S)
+    d.line([px, gy + 14 * S, px, gy + 62 * S], fill=NAVY, width=4 * S)   # string
+    d.polygon([(px - 42 * S, gy + 62 * S), (px + 42 * S, gy + 62 * S),
+               (px, gy + 96 * S)], fill=GOLD, outline=NAVY)             # pan
+d.line([gx + 10 * S, gy + gh - 12 * S, gx + gw - 10 * S, gy + gh - 12 * S],
+       fill=NAVY, width=5 * S)                                          # base
 
+y += LEAD_H + 18 * S
 
-def burst(draw, cx, cy, radius, colour, points=8):
-    pts = []
-    for k in range(points * 2):
-        angle = -pi / 2 + k * pi / points
-        reach = radius if k % 2 == 0 else radius * 0.42
-        pts.append((cx + reach * cos(angle), cy + reach * sin(angle)))
-    draw.polygon(pts, fill=colour)
+# ---------------------------------------------------------------- three cards
+CARD3_W = (CW - 2 * 16 * S) // 3
+CARD3_H = 248 * S
 
+def storm_cloud(cx, cy, s):
+    d.ellipse([cx - 70 * s, cy - 30 * s, cx + 10 * s, cy + 30 * s], fill=(90, 105, 130))
+    d.ellipse([cx - 30 * s, cy - 45 * s, cx + 55 * s, cy + 25 * s], fill=(110, 125, 150))
+    d.ellipse([cx + 5 * s, cy - 25 * s, cx + 75 * s, cy + 30 * s], fill=(90, 105, 130))
+    d.polygon([(cx - 5 * s, cy + 20 * s), (cx + 15 * s, cy + 20 * s),
+               (cx - 5 * s, cy + 55 * s), (cx + 20 * s, cy + 55 * s),
+               (cx - 10 * s, cy + 95 * s), (cx - 15 * s, cy + 60 * s),
+               (cx + 5 * s, cy + 60 * s)], fill=GOLD)
 
-# ------------------------------------------------------------- glyphs
-def glyph_tower(draw, cx, cy, r):
-    w = 6 * SCALE
-    base = cy + r * 0.9
-    draw.rectangle([cx - r * 0.34, cy - r * 0.75, cx - r * 0.02, base],
-                   outline=INK, width=w)
-    draw.rectangle([cx + r * 0.08, cy - r * 0.35, cx + r * 0.36, base],
-                   outline=INK, width=w)
-    for k in range(4):
-        yy = cy - r * 0.55 + k * r * 0.32
-        draw.line([cx - r * 0.28, yy, cx - r * 0.08, yy], fill=INK, width=w - 2 * SCALE)
-    draw.line([cx - r * 0.55, base, cx + r * 0.55, base], fill=INK, width=w)
-    burst(draw, cx - r * 0.18, cy - r * 0.85, r * 0.34, RUST)
-    draw.arc([cx + r * 0.05, cy - r * 1.05, cx + r * 0.75, cy - r * 0.45],
-             200, 340, fill=MUTED, width=4 * SCALE)
-    draw.arc([cx + r * 0.2, cy - r * 0.9, cx + r * 0.9, cy - r * 0.3],
-             200, 340, fill=MUTED, width=4 * SCALE)
+def boat(cx, cy, s):
+    cx, cy = int(cx), int(cy)
+    d.line([cx, int(cy - 70 * s), cx, int(cy + 10 * s)], fill=NAVY,
+           width=int(5 * s))                                             # mast
+    d.polygon([(int(cx + 6 * s), int(cy - 66 * s)), (int(cx + 6 * s), int(cy - 8 * s)),
+               (int(cx + 62 * s), int(cy - 8 * s))], fill=(200, 60, 50))  # sail
+    d.polygon([(int(cx - 78 * s), int(cy + 10 * s)), (int(cx + 78 * s), int(cy + 10 * s)),
+               (int(cx + 58 * s), int(cy + 42 * s)), (int(cx - 58 * s), int(cy + 42 * s))],
+              fill=NAVY)                                                 # hull
+    for wx in (-60, -10, 40):
+        d.arc([int(cx + wx * s), int(cy + 52 * s), int(cx + (wx + 34) * s),
+               int(cy + 72 * s)], 0, 180, fill=BLUE, width=int(4 * s))    # waves
 
+def jet(cx, cy, s):
+    d.polygon([(cx - 80 * s, cy), (cx - 30 * s, cy - 18 * s),
+               (cx + 55 * s, cy - 10 * s), (cx + 85 * s, cy),
+               (cx + 55 * s, cy + 10 * s), (cx - 30 * s, cy + 18 * s)],
+              fill=NAVY)                                                 # fuselage
+    d.polygon([(cx - 10 * s, cy - 12 * s), (cx + 20 * s, cy - 52 * s),
+               (cx + 32 * s, cy - 50 * s), (cx + 18 * s, cy - 8 * s)],
+              fill=NAVY)                                                 # wing
+    d.polygon([(cx - 55 * s, cy - 8 * s), (cx - 40 * s, cy - 38 * s),
+               (cx - 28 * s, cy - 36 * s), (cx - 38 * s, cy - 4 * s)],
+              fill=NAVY)                                                 # tail
 
-def glyph_scales(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.line([cx, cy - r * 0.9, cx, cy + r * 0.85], fill=INK, width=w)
-    draw.line([cx - r * 0.85, cy - r * 0.55, cx + r * 0.85, cy - r * 0.55],
-              fill=INK, width=w)
-    draw.line([cx - r * 0.6, cy + r * 0.85, cx + r * 0.6, cy + r * 0.85],
-              fill=INK, width=w)
-    for side in (-1, 1):
-        px = cx + side * r * 0.85
-        draw.line([px, cy - r * 0.55, px, cy - r * 0.05], fill=INK, width=w - 2 * SCALE)
-        draw.arc([px - r * 0.34, cy - r * 0.28, px + r * 0.34, cy + r * 0.28],
-                 0, 180, fill=TEAL, width=w)
-    draw.ellipse([cx - r * 0.1, cy - r * 1.0, cx + r * 0.1, cy - r * 0.8],
-                 fill=RUST)
-
-
-def glyph_rocket(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.polygon([(cx, cy - r * 0.95), (cx + r * 0.34, cy - r * 0.1),
-                  (cx + r * 0.34, cy + r * 0.45), (cx, cy + r * 0.62),
-                  (cx - r * 0.34, cy + r * 0.45), (cx - r * 0.34, cy - r * 0.1)],
-                 outline=INK, width=w)
-    draw.ellipse([cx - r * 0.16, cy - r * 0.55, cx + r * 0.16, cy - r * 0.23],
-                 outline=PLUM, width=w - SCALE)
-    draw.polygon([(cx - r * 0.34, cy + r * 0.25), (cx - r * 0.62, cy + r * 0.72),
-                  (cx - r * 0.34, cy + r * 0.55)], fill=RUST)
-    draw.polygon([(cx + r * 0.34, cy + r * 0.25), (cx + r * 0.62, cy + r * 0.72),
-                  (cx + r * 0.34, cy + r * 0.55)], fill=RUST)
-    draw.polygon([(cx - r * 0.14, cy + r * 0.62), (cx + r * 0.14, cy + r * 0.62),
-                  (cx, cy + r * 1.0)], fill=GOLD)
-    burst(draw, cx + r * 0.72, cy - r * 0.8, r * 0.14, GOLD)
-    burst(draw, cx - r * 0.78, cy - r * 0.4, r * 0.1, GOLD)
-
-
-def glyph_helicopter(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.rounded_rectangle([cx - r * 0.55, cy - r * 0.3, cx + r * 0.45, cy + r * 0.35],
-                           radius=14 * SCALE, outline=INK, width=w)
-    draw.ellipse([cx + r * 0.18, cy - r * 0.16, cx + r * 0.42, cy + r * 0.08],
-                 outline=SLATE, width=w - 2 * SCALE)
-    draw.line([cx + r * 0.45, cy, cx + r * 0.95, cy - r * 0.12], fill=INK, width=w - SCALE)
-    draw.line([cx + r * 0.85, cy - r * 0.42, cx + r * 0.85, cy + r * 0.18],
-              fill=RUST, width=w - SCALE)
-    draw.line([cx - r * 0.05, cy - r * 0.3, cx - r * 0.05, cy - r * 0.62],
-              fill=INK, width=w - SCALE)
-    draw.line([cx - r * 0.95, cy - r * 0.62, cx + r * 0.95, cy - r * 0.62],
-              fill=INK, width=w)
-    draw.line([cx - r * 0.45, cy + r * 0.35, cx - r * 0.3, cy + r * 0.62],
-              fill=INK, width=w - 2 * SCALE)
-    draw.line([cx + r * 0.3, cy + r * 0.35, cx + r * 0.45, cy + r * 0.62],
-              fill=INK, width=w - 2 * SCALE)
-    draw.line([cx - r * 0.5, cy + r * 0.62, cx + r * 0.5, cy + r * 0.62],
-              fill=INK, width=w - 2 * SCALE)
-
-
-def glyph_boat(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.line([cx, cy - r * 0.9, cx, cy + r * 0.25], fill=INK, width=w - SCALE)
-    draw.polygon([(cx, cy - r * 0.9), (cx, cy - r * 0.1),
-                  (cx + r * 0.5, cy - r * 0.1)], fill=TEAL)
-    draw.polygon([(cx - r * 0.15, cy - r * 0.55), (cx - r * 0.15, cy - r * 0.1),
-                  (cx - r * 0.55, cy - r * 0.1)], outline=INK, width=w - 2 * SCALE)
-    draw.polygon([(cx - r * 0.75, cy + r * 0.25), (cx + r * 0.75, cy + r * 0.25),
-                  (cx + r * 0.55, cy + r * 0.6), (cx - r * 0.55, cy + r * 0.6)],
-                 outline=INK, width=w)
-    for k, yy in enumerate((0.78, 0.95)):
-        draw.arc([cx - r * 0.9, cy + r * yy - r * 0.14, cx - r * 0.1, cy + r * yy + r * 0.14],
-                 180, 360, fill=SLATE, width=4 * SCALE)
-        draw.arc([cx + r * 0.1, cy + r * yy - r * 0.14, cx + r * 0.9, cy + r * yy + r * 0.14],
-                 180, 360, fill=SLATE, width=4 * SCALE)
-
-
-def glyph_retreat(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.line([cx + r * 0.45, cy - r * 0.9, cx + r * 0.45, cy + r * 0.85],
-              fill=INK, width=w - SCALE)
-    draw.polygon([(cx + r * 0.45, cy - r * 0.9), (cx - r * 0.35, cy - r * 0.62),
-                  (cx + r * 0.45, cy - r * 0.34)], fill=PINE)
-    draw.arc([cx - r * 0.85, cy - r * 0.1, cx + r * 0.45, cy + r * 0.9],
-             90, 270, fill=RUST, width=w)
-    draw.polygon([(cx - r * 0.85, cy + r * 0.4), (cx - r * 0.55, cy + r * 0.4),
-                  (cx - r * 0.7, cy + r * 0.62)], fill=RUST)
-    draw.line([cx - r * 0.85, cy + r * 0.85, cx + r * 0.85, cy + r * 0.85],
-              fill=INK, width=w - 2 * SCALE)
-
-
-
-def glyph_flame(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.polygon([(cx, cy - r * 0.95), (cx + r * 0.42, cy - r * 0.1),
-                  (cx + r * 0.55, cy + r * 0.35), (cx + r * 0.3, cy + r * 0.85),
-                  (cx - r * 0.3, cy + r * 0.85), (cx - r * 0.55, cy + r * 0.35),
-                  (cx - r * 0.42, cy - r * 0.1)], fill=RUST)
-    draw.polygon([(cx, cy - r * 0.45), (cx + r * 0.22, cy + r * 0.05),
-                  (cx + r * 0.28, cy + r * 0.4), (cx, cy + r * 0.6),
-                  (cx - r * 0.28, cy + r * 0.4), (cx - r * 0.22, cy + r * 0.05)],
-                 fill=GOLD)
-    draw.line([cx - r * 0.7, cy + r * 0.95, cx + r * 0.7, cy + r * 0.95],
-              fill=INK, width=w - 2 * SCALE)
-
-
-def glyph_atom(draw, cx, cy, r):
-    w = 6 * SCALE
-    import math
-    for ang, col in ((0, INK), (60, TEAL), (120, PLUM)):
-        th = math.radians(ang)
-        pts = []
-        for k in range(49):
-            t = 2 * math.pi * k / 48
-            x = r * 0.9 * math.cos(t)
-            y = r * 0.36 * math.sin(t)
-            pts.append((cx + x * math.cos(th) - y * math.sin(th),
-                        cy + x * math.sin(th) + y * math.cos(th)))
-        draw.line(pts, fill=col, width=w - 2 * SCALE, joint="curve")
-    draw.ellipse([cx - r * 0.13, cy - r * 0.13, cx + r * 0.13, cy + r * 0.13],
-                 fill=RUST)
-
-
-def glyph_jet(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.polygon([(cx + r * 0.95, cy), (cx + r * 0.3, cy - r * 0.18),
-                  (cx - r * 0.55, cy - r * 0.22), (cx - r * 0.9, cy - r * 0.42),
-                  (cx - r * 0.72, cy), (cx - r * 0.9, cy + r * 0.42),
-                  (cx - r * 0.55, cy + r * 0.22), (cx + r * 0.3, cy + r * 0.18)],
-                 outline=INK, width=w)
-    draw.polygon([(cx - r * 0.1, cy - r * 0.2), (cx + r * 0.15, cy - r * 0.75),
-                  (cx + r * 0.3, cy - r * 0.2)], fill=RUST)
-    draw.polygon([(cx - r * 0.1, cy + r * 0.2), (cx + r * 0.15, cy + r * 0.75),
-                  (cx + r * 0.3, cy + r * 0.2)], fill=RUST)
-    draw.line([cx - r * 0.9, cy, cx - r * 1.05, cy], fill=GOLD, width=w)
-    burst(draw, cx - r * 0.15, cy - r * 0.85, r * 0.12, GOLD)
-
-
-def glyph_magnifier(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.ellipse([cx - r * 0.62, cy - r * 0.85, cx + r * 0.42, cy + r * 0.19],
-                 outline=INK, width=w)
-    draw.ellipse([cx - r * 0.34, cy - r * 0.57, cx + r * 0.14, cy - r * 0.09],
-                 outline=TEAL, width=w - 2 * SCALE)
-    draw.line([cx + r * 0.3, cy + r * 0.07, cx + r * 0.85, cy + r * 0.62],
-              fill=RUST, width=w)
-    draw.line([cx + r * 0.72, cy + r * 0.5, cx + r * 0.95, cy + r * 0.73],
-              fill=INK, width=w - SCALE)
-
-
-def glyph_storm(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.ellipse([cx - r * 0.9, cy - r * 0.55, cx + r * 0.9, cy + r * 0.25],
-                 outline=INK, width=w)
-    draw.ellipse([cx - r * 0.5, cy - r * 0.95, cx + r * 0.45, cy - r * 0.15],
-                 outline=INK, width=w)
-    draw.line([cx - r * 0.75, cy + r * 0.25, cx + r * 0.75, cy + r * 0.25],
-              fill=INK, width=w - SCALE)
-    draw.polygon([(cx + r * 0.15, cy + r * 0.25), (cx - r * 0.25, cy + r * 0.65),
-                  (cx + r * 0.05, cy + r * 0.65), (cx - r * 0.3, cy + r * 1.05),
-                  (cx + r * 0.35, cy + r * 0.45), (cx + r * 0.05, cy + r * 0.45)],
-                 fill=GOLD)
-
-
-def glyph_megaphone(draw, cx, cy, r):
-    w = 6 * SCALE
-    draw.polygon([(cx - r * 0.75, cy - r * 0.35), (cx + r * 0.35, cy - r * 0.75),
-                  (cx + r * 0.35, cy + r * 0.75), (cx - r * 0.75, cy + r * 0.35)],
-                 outline=INK, width=w)
-    draw.line([cx - r * 0.75, cy - r * 0.35, cx - r * 0.75, cy + r * 0.35],
-              fill=RUST, width=w)
-    draw.line([cx - r * 0.9, cy + r * 0.45, cx - r * 0.55, cy + r * 0.9],
-              fill=INK, width=w - SCALE)
-    draw.arc([cx + r * 0.45, cy - r * 0.5, cx + r * 0.95, cy + r * 0.5],
-             270, 90, fill=TEAL, width=w - 2 * SCALE)
-    draw.arc([cx + r * 0.6, cy - r * 0.25, cx + r * 0.8, cy + r * 0.25],
-             270, 90, fill=TEAL, width=w - 2 * SCALE)
-
-
-# ------------------------------------------------------------- stories
-@dataclass
-class Story:
-    kicker: str
-    accent: tuple
-    headline: str
-    standfirst: str
-    glyph: object
-
-
-LEAD = Story(
-    "LEAD STORY · ELECTION",
-    RUST,
-    "New Zealand coalition loses its majority",
-    ("Final results leave PM Luxon one seat short; the centre-right "
-     "government now needs the centrist Opportunity Party to stay in power."),
-    glyph_scales,
-)
-
-ROW_THREE = [
-    Story("WEATHER · USA", SLATE,
-          "Thanksgiving storm grounds 400 flights, cuts power to 724,000",
-          "A powerful storm sweeps the US East on the holiday; more "
-          "than 2,000 flights are delayed.",
-          glyph_storm),
-    Story("DISASTER · SPAIN", TEAL,
-          "Diesel tanker sinks off Ibiza, one crew member dead",
-          "The tanker, carrying up to 7,000 tonnes of diesel, capsizes; "
-          "a slick spreads off the island.",
-          glyph_boat),
-    Story("GULF · KUWAIT", OCHRE,
-          "Two Italians killed in drone strike in Kuwait",
-          "The technicians were servicing air defences; Iran denies "
-          "any role in the attack.",
-          glyph_jet),
+stories3 = [
+    ("WEATHER  ·  USA",
+     "Thanksgiving storm grounds 400 flights, cuts power to 724,000",
+     "A powerful storm sweeps the US East on the holiday; more than "
+     "2,000 flights are delayed.",
+     storm_cloud),
+    ("DISASTER  ·  SPAIN",
+     "Diesel tanker sinks off Ibiza, one crew member dead",
+     "The tanker, carrying up to 7,000 tonnes of diesel, capsizes; "
+     "a slick spreads off the island.",
+     boat),
+    ("GULF  ·  KUWAIT",
+     "Two Italians killed in drone strike in Kuwait",
+     "The technicians were servicing air defences; Iran denies any "
+     "role in the attack.",
+     jet),
 ]
 
-ROW_TWO = [
-    Story("GULF · HORMUZ", RUST,
-          "Iran reports blasts on three tankers in the Strait of Hormuz",
-          "Explosions hit three ships in the world's busiest oil waterway "
-          "as Gulf tensions climb.",
-          glyph_flame),
-    Story("USA · THANKSGIVING", PLUM,
-          "Trump's Thanksgiving message lashes out at foes and migrants",
-          "The president uses the holiday message to attack political "
-          "rivals and the federal government.",
-          glyph_megaphone),
+for i, (kick, head, stand, glyph) in enumerate(stories3):
+    x = M + i * (CARD3_W + 16 * S)
+    card(x, y, CARD3_W, CARD3_H)
+    tx, ty = x + 16 * S, y + 14 * S
+    tw3 = CARD3_W - 32 * S
+    ty = kicker(tx, ty, kick)
+    hf3 = F_SERIF_BOLD(20)
+    hl = wrap(head, hf3, tw3)
+    ty = text_block(tx, ty + 2 * S, hl, hf3, INK, spacing=4 * S)
+    sf3 = F_SANS(15)
+    sl = wrap(stand, sf3, tw3)
+    ty = text_block(tx, ty + 6 * S, sl, sf3, GREY, spacing=4 * S)
+    # glyph centred in the remaining space
+    gy3 = ty + 8 * S
+    avail = y + CARD3_H - 12 * S - gy3
+    if avail > 40 * S:
+        glyph(x + CARD3_W // 2, gy3 + avail // 2 - 6 * S, S * 0.45)
+
+y += CARD3_H + 18 * S
+
+# ---------------------------------------------------------------- two wide cards
+CARD2_W = (CW - 16 * S) // 2
+CARD2_H = 190 * S
+
+def flame(cx, cy, s):
+    d.polygon([(cx, cy - 75 * s), (cx + 28 * s, cy - 25 * s),
+               (cx + 52 * s, cy - 5 * s), (cx + 42 * s, cy + 30 * s),
+               (cx + 15 * s, cy + 55 * s), (cx - 18 * s, cy + 55 * s),
+               (cx - 42 * s, cy + 28 * s), (cx - 48 * s, cy - 8 * s),
+               (cx - 22 * s, cy - 30 * s)],
+              fill=(220, 90, 30))
+    d.polygon([(cx, cy - 30 * s), (cx + 16 * s, cy),
+               (cx + 10 * s, cy + 28 * s), (cx - 12 * s, cy + 28 * s),
+               (cx - 16 * s, cy - 2 * s)], fill=GOLD)
+
+def megaphone(cx, cy, s):
+    d.polygon([(cx - 55 * s, cy - 18 * s), (cx + 25 * s, cy - 48 * s),
+               (cx + 25 * s, cy + 48 * s), (cx - 55 * s, cy + 18 * s)],
+              fill=RED)                                                  # cone
+    d.rectangle([cx - 72 * s, cy - 16 * s, cx - 52 * s, cy + 16 * s],
+                fill=NAVY)                                               # mouthpiece
+    d.polygon([(cx - 30 * s, cy + 22 * s), (cx - 8 * s, cy + 22 * s),
+               (cx - 14 * s, cy + 62 * s), (cx - 30 * s, cy + 62 * s)],
+              fill=NAVY)                                                 # handle
+    for r in (58, 74):
+        d.arc([int(cx + 30 * s), int(cy - r * s), int(cx + 30 * s + 24 * s),
+               int(cy + r * s)], -55, 55, fill=NAVY, width=int(5 * s))   # sound arcs
+
+stories2 = [
+    ("GULF  ·  HORMUZ",
+     "Iran reports blasts on three tankers in the Strait of Hormuz",
+     "Explosions hit three ships in the world's busiest oil waterway "
+     "as Gulf tensions climb.",
+     flame),
+    ("USA  ·  THANKSGIVING",
+     "Trump's Thanksgiving message lashes out at foes and migrants",
+     "The president uses the holiday message to attack political "
+     "rivals and the federal government.",
+     megaphone),
 ]
 
-TICKER = (
-    "Zelensky warns of a new Russian mass strike in the coming days   \u00b7   "
-    "Trump urges Putin to pull back military aggression   \u00b7   "
-    "UK net migration falls to near a 30-year low   \u00b7   "
-    "Argentina bans its central bank from printing money for the state   \u00b7   "
-    "Delhi police free 164 foreigners in cyber-slavery bust   \u00b7   "
-    "Bangkok oil depot blast injures seven, four critical   \u00b7   "
-    "EU budget talks for 2028\u201334 end with no deal   \u00b7   "
-    "All hostages freed after 16-hour supermarket siege in Colombia"
-)
+for i, (kick, head, stand, glyph) in enumerate(stories2):
+    x = M + i * (CARD2_W + 16 * S)
+    card(x, y, CARD2_W, CARD2_H)
+    tx, ty = x + 16 * S, y + 14 * S
+    glyph_w2 = 150 * S
+    tw2 = CARD2_W - 32 * S - glyph_w2
+    ty = kicker(tx, ty, kick)
+    hf2 = F_SERIF_BOLD(22)
+    hl = wrap(head, hf2, tw2)
+    ty = text_block(tx, ty + 2 * S, hl, hf2, INK, spacing=4 * S)
+    sf2 = F_SANS(15)
+    sl = wrap(stand, sf2, tw2)
+    text_block(tx, ty + 6 * S, sl, sf2, GREY, spacing=4 * S)
+    glyph(x + CARD2_W - glyph_w2 // 2 - 8 * S, y + CARD2_H // 2, S * 0.62)
 
+y += CARD2_H + 18 * S
 
-# ------------------------------------------------------------- cards
-def card_height(draw, story, text_w, head_pt, body_pt, icon_r):
-    head = face(SANS_BOLD, head_pt)
-    body = face(SANS, body_pt)
-    head_lines = fit_lines(draw, story.headline, head, text_w)
-    body_lines = fit_lines(draw, story.standfirst, body, text_w)
-    icon_space = max(icon_r * 2 + 20, 0)
-    text_h = 56 + block_height(head, len(head_lines), 1.12) + 6 \
-        + block_height(body, len(body_lines), 1.22) + 18
-    return max(text_h, icon_space + 28)
+# ---------------------------------------------------------------- ticker
+TICK_H = 132 * S
+d.rectangle([M, y, M + CW, y + TICK_H], fill=NAVY)
+d.rectangle([M, y, M + CW, y + TICK_H], outline=GOLD, width=2 * S)
+tf2 = F_SANS_BOLD(16)
+d.text((M + 16 * S, y + 12 * S), "ALSO ON FRIDAY", font=tf2, fill=GOLD)
+items = [
+    "Zelensky warns of a new Russian mass strike in the coming days",
+    "Trump urges Putin to pull back military aggression",
+    "UK net migration falls to near a 30-year low",
+    "Argentina bans its central bank from printing money for the state",
+    "Delhi police free 164 foreigners in cyber-slavery bust",
+    "Bangkok oil depot blast injures seven, four critical",
+    "EU budget talks for 2028–34 end with no deal",
+    "All hostages freed after 16-hour supermarket siege in Colombia",
+]
+ticker_text = "  ·  ".join(items)
+tf3 = F_SANS(16)
+t_lines = wrap(ticker_text, tf3, CW - 32 * S)
+ty = y + 38 * S
+for ln in t_lines:
+    d.text((M + 16 * S, ty), ln, font=tf3, fill=(255, 255, 255))
+    ty += tf3.size + 5 * S
 
+y += TICK_H + 14 * S
 
-def paint_card(draw, box, story, head_pt=26, body_pt=19, icon_r=52):
-    x0, y0, x1, y1 = [v * SCALE for v in box]
-    draw.rounded_rectangle([x0, y0, x1, y1], radius=10 * SCALE,
-                           fill=CARD, outline=INK, width=2 * SCALE)
-    tag_chip(draw, x0 + 16 * SCALE, y0 + 14 * SCALE, story.kicker, story.accent)
-    icon_cx = x1 - (icon_r + 20) * SCALE
-    icon_cy = y0 + (y1 - y0) // 2 + 6 * SCALE
-    story.glyph(draw, icon_cx, icon_cy, icon_r * SCALE)
-    text_w = (x1 - x0) - 32 * SCALE - (icon_r * 2 + 30) * SCALE
-    head = face(SANS_BOLD, head_pt)
-    body = face(SANS, body_pt)
-    top = y0 + 56 * SCALE
-    top = paint_lines(draw, x0 + 16 * SCALE, top,
-                      fit_lines(draw, story.headline, head, text_w),
-                      head, INK, 1.12)
-    paint_lines(draw, x0 + 16 * SCALE, top + 6 * SCALE,
-                fit_lines(draw, story.standfirst, body, text_w),
-                body, BODY_INK, 1.22)
+# ---------------------------------------------------------------- footer
+ff = F_SANS_ITAL(14)
+credit = ("Drawn from Friday's reporting by Reuters, Al Jazeera, AP "
+          "and NDTV · 27 November 2026")
+cw = d.textlength(credit, font=ff)
+d.text(((W - cw) / 2, y), credit, font=ff, fill=GREY)
 
-
-def build():
-    page = Image.new("RGB", (CANVAS, CANVAS), PAPER)
-    draw = ImageDraw.Draw(page)
-    margin = 36
-    y = 0
-
-    # navy masthead band with the date in gold
-    band_h = 116
-    draw.rectangle([0, 0, CANVAS, band_h * SCALE], fill=NAVY)
-    y = centred_line(draw, 14 * SCALE,
-                     "T H E   W O R L D   I N   O N E   P I C T U R E",
-                     face(SANS_BOLD, 19), (232, 228, 218))
-    y = centred_line(draw, y + 2 * SCALE, "FRIDAY 27 NOVEMBER 2026",
-                     face(SERIF_BOLD, 52), GOLD)
-    draw.line([margin * SCALE, (band_h - 10) * SCALE,
-               CANVAS - margin * SCALE, (band_h - 10) * SCALE],
-              fill=GOLD, width=2 * SCALE)
-    y = band_h + 8
-
-    # lead story: glyph on the left, headline on the right
-    lead_head = face(SANS_BOLD, 36)
-    lead_body = face(SANS, 20)
-    lead_text_w = (SIZE - 2 * margin - 260) * SCALE
-    lead_head_lines = fit_lines(draw, LEAD.headline, lead_head, lead_text_w)
-    lead_body_lines = fit_lines(draw, LEAD.standfirst, lead_body, lead_text_w)
-    lead_h = 12 + 28 + 10 + block_height(lead_head, len(lead_head_lines), 1.1) \
-        + 6 + block_height(lead_body, len(lead_body_lines), 1.22) + 12
-    lx0, ly0, lx1, ly1 = margin, y, SIZE - margin, y + lead_h
-    draw.rounded_rectangle([lx0 * SCALE, ly0 * SCALE, lx1 * SCALE, ly1 * SCALE],
-                           radius=10 * SCALE, fill=CARD, outline=INK, width=3 * SCALE)
-    tag_chip(draw, (lx0 + 216) * SCALE, ly0 * SCALE + 12 * SCALE,
-             LEAD.kicker, LEAD.accent)
-    LEAD.glyph(draw, (lx0 + 108) * SCALE,
-                ly0 * SCALE + (lead_h // 2 + 10) * SCALE, 80 * SCALE)
-    draw.line([(lx0 + 216) * SCALE, (ly0 + 12) * SCALE,
-               (lx0 + 216) * SCALE, (ly1 - 12) * SCALE],
-              fill=GOLD, width=2 * SCALE)
-    top = ly0 * SCALE + 50 * SCALE
-    top = paint_lines(draw, (lx0 + 232) * SCALE, top, lead_head_lines,
-                      lead_head, INK, 1.1)
-    paint_lines(draw, (lx0 + 232) * SCALE, top + 6 * SCALE, lead_body_lines,
-                lead_body, BODY_INK, 1.22)
-    y = ly1 + 5
-
-    # three stories side by side
-    gap = 10
-    col_w = (SIZE - 2 * margin - 2 * gap) // 3
-    inner_w = (col_w * SCALE - 32 * SCALE - (36 * 2 + 24) * SCALE)
-    row_h = max(card_height(draw, s, inner_w, 20, 16, 36) for s in ROW_THREE)
-    for i, story in enumerate(ROW_THREE):
-        left = margin + i * (col_w + gap)
-        paint_card(draw, [left, y, left + col_w, y + row_h], story,
-                   head_pt=20, body_pt=16, icon_r=36)
-    y += row_h + 5
-
-    # two wider stories side by side
-    col2_w = (SIZE - 2 * margin - gap) // 2
-    inner2_w = (col2_w * SCALE - 32 * SCALE - (48 * 2 + 28) * SCALE)
-    row2_h = max(card_height(draw, s, inner2_w, 24, 18, 48) for s in ROW_TWO)
-    for i, story in enumerate(ROW_TWO):
-        left = margin + i * (col2_w + gap)
-        paint_card(draw, [left, y, left + col2_w, y + row2_h], story,
-                   head_pt=24, body_pt=18, icon_r=48)
-    y += row2_h + 5
-
-    # navy ticker strip with the day's shorter items
-    tick_font = face(SANS, 19)
-    tick_lines = fit_lines(draw, TICKER, tick_font,
-                           (SIZE - 2 * margin - 36) * SCALE)
-    strip_h = 4 + 26 + 2 + block_height(tick_font, len(tick_lines), 1.25) + 4
-    draw.rectangle([margin * SCALE, y * SCALE, (SIZE - margin) * SCALE,
-                    (y + strip_h) * SCALE], fill=NAVY)
-    draw.text(((margin + 16) * SCALE, (y + 9) * SCALE), "ALSO ON FRIDAY",
-              font=face(SANS_BOLD, 19), fill=GOLD)
-    paint_lines(draw, (margin + 16) * SCALE, (y + 38) * SCALE, tick_lines,
-                tick_font, (242, 238, 226), 1.25)
-    y += strip_h + 2
-
-    centred_line(draw, y * SCALE,
-                 "Drawn from Friday's reporting by Reuters, Al Jazeera, AP and "
-                 "NDTV  \u00b7  27 November 2026",
-                 face(SANS_ITALIC, 18), MUTED)
-    print(f"layout ends at y={y + 26} of {SIZE}")
-
-    page.resize((SIZE, SIZE), Image.LANCZOS).save(OUT, optimize=True)
-    print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
-
-
-if __name__ == "__main__":
-    build()
+# ---------------------------------------------------------------- save
+img = img.resize((1024, 1024), Image.LANCZOS)
+img.save(OUT, "PNG", optimize=True)
+print("wrote", OUT, img.size, os.path.getsize(OUT), "bytes")
